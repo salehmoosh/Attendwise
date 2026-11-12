@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AttendWise: track attendance for all your subjects</title>
+<style>
+  :root { --paper:#eef3fb; --ink:#14213d; --line:#c7d3ea; --good:#1b7f5a; --bad:#b3261e; --card:#fff; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 20px; min-height: 100vh;
+    font-family: Georgia, "Times New Roman", serif; color: var(--ink);
+    background-color: var(--paper);
+    background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px);
+    background-size: 28px 28px;
+  }
+  .wrap { max-width: 640px; margin: 0 auto; }
+  h1 { margin: 0 0 4px; font-size: 1.9rem; }
+  .sub { margin: 0 0 18px; opacity: .8; }
+  .box { background: var(--card); border: 2px solid var(--ink); border-radius: 6px; padding: 18px; margin-bottom: 18px; box-shadow: 5px 5px 0 var(--ink); }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; }
+  .field { flex: 1 1 120px; }
+  .field.wide { flex: 2 1 200px; }
+  label { display: block; font-weight: bold; font-size: .9rem; }
+  input { width: 100%; margin-top: 5px; padding: 9px 10px; font: inherit; color: var(--ink); background: #fff; border: 2px solid var(--ink); border-radius: 4px; }
+  button { font: inherit; font-weight: bold; cursor: pointer; border: 2px solid var(--ink); border-radius: 4px; padding: 9px 14px; background: var(--ink); color: #fff; }
+  button:hover { background: #22345f; }
+  button.ghost { background: #fff; color: var(--ink); }
+  button.ghost:hover { background: var(--paper); }
+  input:focus-visible, button:focus-visible { outline: 3px solid #4c7be0; outline-offset: 2px; }
+  .overall { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .pct { font-size: 2.6rem; font-weight: bold; line-height: 1; }
+  .good { color: var(--good); } .bad { color: var(--bad); }
+  .msg { margin: 6px 0 0; line-height: 1.4; }
+  .small { font-size: .9rem; opacity: .75; }
+  .subject-head { display: flex; justify-content: space-between; align-items: start; gap: 10px; }
+  .subject-head h2 { margin: 0; font-size: 1.2rem; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  .actions button { padding: 6px 12px; font-size: .9rem; }
+  .empty { text-align: center; padding: 20px; opacity: .8; }
+  .bar { height: 10px; border: 2px solid var(--ink); border-radius: 6px; margin-top: 10px; background: #fff; position: relative; overflow: hidden; }
+  .bar span { display: block; height: 100%; }
+  .bar .good-bg { background: var(--good); } .bar .bad-bg { background: var(--bad); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>AttendWise</h1>
+  <p class="sub">Add your subjects, track every class, and see how many you can safely skip.</p>
+
+  <div class="box">
+    <div class="row">
+      <div class="field">
+        <label for="target">Required attendance (%)</label>
+        <input id="target" type="number" min="1" max="100" value="75" inputmode="numeric">
+      </div>
+    </div>
+  </div>
+
+  <div class="box" id="overallBox"></div>
+
+  <div class="box">
+    <div class="row">
+      <div class="field wide">
+        <label for="name">Subject name</label>
+        <input id="name" type="text" placeholder="e.g. Engineering Maths" maxlength="40">
+      </div>
+      <div class="field">
+        <label for="att">Attended</label>
+        <input id="att" type="number" min="0" value="0" inputmode="numeric">
+      </div>
+      <div class="field">
+        <label for="held">Total held</label>
+        <input id="held" type="number" min="0" value="0" inputmode="numeric">
+      </div>
+      <button id="add">Add subject</button>
+    </div>
+    <p id="formError" class="msg bad" aria-live="polite"></p>
+  </div>
+
+  <div id="list"></div>
+</div>
+
+<script>
+  var subjects = [];
+  var target = 75;
+
+  // Save and load from the browser, so your data stays after you close the page
+  function save() {
+    try { localStorage.setItem("attendwise", JSON.stringify({ subjects: subjects, target: target })); } catch (e) {}
+  }
+  function load() {
+    try {
+      var data = JSON.parse(localStorage.getItem("attendwise"));
+      if (data) { subjects = data.subjects || []; target = data.target || 75; }
+    } catch (e) {}
+  }
+
+  // Stop weird characters in subject names from breaking the page
+  function esc(text) {
+    var d = document.createElement("div");
+    d.textContent = text;
+    return d.innerHTML;
+  }
+
+  // The maths: works for one subject or for the overall total
+  function status(attended, held) {
+    if (held === 0) return { percent: null, cls: "", msg: "No classes held yet." };
+    var percent = (attended / held) * 100;
+    if (percent >= target) {
+      var canSkip = Math.floor((100 * attended) / target - held);
+      return {
+        percent: percent, cls: "good",
+        msg: canSkip > 0
+          ? "You can skip " + canSkip + " more class" + (canSkip === 1 ? "" : "es") + " and stay at " + target + "% or above."
+          : "Right on the edge. Do not skip the next class."
+      };
+    }
+    if (target === 100) return { percent: percent, cls: "bad", msg: "You can never reach 100% now." };
+    var must = Math.ceil((target * held - 100 * attended) / (100 - target));
+    return {
+      percent: percent, cls: "bad",
+      msg: "Attend the next " + must + " class" + (must === 1 ? "" : "es") + " in a row to get back to " + target + "%."
+    };
+  }
+
+  function render() {
+    // Overall box (adds up every subject)
+    var totalA = 0, totalH = 0;
+    subjects.forEach(function (s) { totalA += s.attended; totalH += s.held; });
+    var o = status(totalA, totalH);
+    document.getElementById("overallBox").innerHTML =
+      '<div class="overall"><div><div class="small">Overall attendance</div>' +
+      '<div class="pct ' + o.cls + '">' + (o.percent === null ? "--" : o.percent.toFixed(1) + "%") + '</div></div>' +
+      '<div class="small">' + totalA + " attended of " + totalH + " classes<br>" + subjects.length + " subject" + (subjects.length === 1 ? "" : "s") + '</div></div>' +
+      '<p class="msg">' + (subjects.length ? o.msg : "Add your first subject below to get started.") + '</p>';
+
+    // One card per subject
+    var list = document.getElementById("list");
+    if (!subjects.length) { list.innerHTML = '<div class="empty">No subjects yet.</div>'; return; }
+    list.innerHTML = subjects.map(function (s, i) {
+      var st = status(s.attended, s.held);
+      var width = st.percent === null ? 0 : Math.min(100, st.percent);
+      return '<div class="box"><div class="subject-head"><div><h2>' + esc(s.name) + '</h2>' +
+        '<div class="small">' + s.attended + " / " + s.held + ' classes</div></div>' +
+        '<div class="pct ' + st.cls + '">' + (st.percent === null ? "--" : st.percent.toFixed(1) + "%") + '</div></div>' +
+        '<div class="bar"><span class="' + (st.cls === "bad" ? "bad-bg" : "good-bg") + '" style="width:' + width + '%"></span></div>' +
+        '<p class="msg">' + st.msg + '</p>' +
+        '<div class="actions">' +
+        '<button onclick="mark(' + i + ',true)">Present today</button>' +
+        '<button class="ghost" onclick="mark(' + i + ',false)">Absent today</button>' +
+        '<button class="ghost" onclick="removeSubject(' + i + ')">Remove</button></div></div>';
+    }).join("");
+  }
+
+  function addSubject() {
+    var name = document.getElementById("name").value.trim();
+    var att = Number(document.getElementById("att").value);
+    var held = Number(document.getElementById("held").value);
+    var err = document.getElementById("formError");
+    if (!name) { err.textContent = "Type a subject name first."; return; }
+    if (att < 0 || held < 0) { err.textContent = "Numbers cannot be negative."; return; }
+    if (att > held) { err.textContent = "Attended cannot be more than total held."; return; }
+    err.textContent = "";
+    subjects.push({ name: name, attended: att, held: held });
+    document.getElementById("name").value = "";
+    document.getElementById("att").value = 0;
+    document.getElementById("held").value = 0;
+    save(); render();
+  }
+
+  function mark(i, present) {
+    subjects[i].held += 1;
+    if (present) subjects[i].attended += 1;
+    save(); render();
+  }
+
+  function removeSubject(i) {
+    if (confirm("Remove " + subjects[i].name + "?")) { subjects.splice(i, 1); save(); render(); }
+  }
+
+  document.getElementById("add").addEventListener("click", addSubject);
+  document.getElementById("name").addEventListener("keydown", function (e) { if (e.key === "Enter") addSubject(); });
+  document.getElementById("target").addEventListener("input", function () {
+    var v = Number(this.value);
+    if (v >= 1 && v <= 100) { target = v; save(); render(); }
+  });
+
+  load();
+  document.getElementById("target").value = target;
+  render();
+</script>
+</body>
+</html>
