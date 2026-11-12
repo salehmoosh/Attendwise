@@ -2,7 +2,7 @@
 
 A simple web app to track attendance for all your subjects.
 
-**Live demo:** https://salehmoosh.github.io/attendwise/
+**Live demo:** (https://salehmoosh.github.io/Attendwise/)
 
 ## What it does
 - Add any subjects you want
